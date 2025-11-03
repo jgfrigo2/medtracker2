@@ -1,14 +1,9 @@
+
 import React, { useState, useRef, useEffect, createContext, useContext, ReactNode, useCallback, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceDot, ReferenceArea } from 'recharts';
-// FIX: Switched to specific date-fns imports to resolve module resolution errors, likely from a version mismatch (targeting date-fns@2).
-import format from 'date-fns/format';
-import endOfMonth from 'date-fns/endOfMonth';
-import eachDayOfInterval from 'date-fns/eachDayOfInterval';
-import getDay from 'date-fns/getDay';
-import addMonths from 'date-fns/addMonths';
-import isSameDay from 'date-fns/isSameDay';
-import isToday from 'date-fns/isToday';
+// Fix: Import startOfMonth and subMonths from their specific sub-modules to resolve export errors.
+import { format, endOfMonth, eachDayOfInterval, getDay, addMonths, isSameDay, isToday } from 'date-fns';
 import startOfMonth from 'date-fns/startOfMonth';
 import subMonths from 'date-fns/subMonths';
 import es from 'date-fns/locale/es';
@@ -33,13 +28,6 @@ import {
     Upload
 } from 'lucide-react';
 
-// --- CONFIGURACIÓN DE USUARIO ---
-// Por favor, reemplace estos valores con sus propias credenciales.
-const APP_PASSWORD = 'password123'; // Reemplace con su contraseña deseada.
-const JSONBIN_API_KEY = 'YOUR_JSONBIN_API_KEY'; // Reemplace con su X-Master-Key de jsonbin.io
-const JSONBIN_BIN_ID = 'YOUR_JSONBIN_BIN_ID'; // Reemplace con su ID de bin de jsonbin.io
-
-
 // --- TYPES ---
 interface TimeSlotData {
     value: number | null;
@@ -62,7 +50,6 @@ interface AppContextType {
     medications: string[];
     standardPattern: StandardPattern;
     isLoading: boolean;
-    isDataLoading: boolean;
     isSaving: boolean;
     updateHealthData: (date: string, data: DailyData) => Promise<void>;
     addMedication: (med: string) => Promise<void>;
@@ -80,39 +67,7 @@ for (let h = 8; h < 24; h++) {
       TIME_SLOTS.push(`${h.toString().padStart(2, '0')}:30`);
     }
 }
-
-// --- SERVICES ---
-const JSONBIN_API_URL = 'https://api.jsonbin.io/v3/b';
-async function loadDataFromBin(apiKey: string, binId: string, defaultData: UserDataBundle): Promise<UserDataBundle> {
-    try {
-        const response = await fetch(`${JSONBIN_API_URL}/${binId}/latest`, {
-            method: 'GET',
-            headers: { 'X-Master-Key': apiKey, 'X-Bin-Meta': 'false' },
-        });
-        if (!response.ok) {
-            if (response.status === 404) return defaultData;
-            throw new Error(`Failed to load: ${response.statusText}`);
-        }
-        const responseText = await response.text();
-        return responseText ? JSON.parse(responseText) : defaultData;
-    } catch (error) {
-        console.error("Error loading from jsonbin.io:", error);
-        return defaultData;
-    }
-}
-async function saveDataToBin(apiKey: string, binId: string, data: UserDataBundle): Promise<void> {
-    try {
-        const response = await fetch(`${JSONBIN_API_URL}/${binId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Master-Key': apiKey },
-            body: JSON.stringify(data),
-        });
-        if (!response.ok) throw new Error(`Failed to save: ${response.statusText}`);
-    } catch (error) {
-        console.error("Error saving to jsonbin.io:", error);
-        throw error;
-    }
-}
+const APP_PASSWORD = "Josep";
 
 // --- HOOKS ---
 function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] {
@@ -121,13 +76,18 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val
             const item = window.localStorage.getItem(key);
             return item ? JSON.parse(item) : initialValue;
         } catch (error) {
+            console.error(error);
             return initialValue;
         }
     });
     const setValue = (value: T | ((val: T) => T)) => {
-        const valueToStore = value instanceof Function ? value(storedValue) : value;
-        setStoredValue(valueToStore);
-        window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        try {
+            const valueToStore = value instanceof Function ? value(storedValue) : value;
+            setStoredValue(valueToStore);
+            window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        } catch (error) {
+            console.error(error);
+        }
     };
     return [storedValue, setValue];
 }
@@ -144,64 +104,40 @@ const defaultUserDataBundle: UserDataBundle = {
 };
 
 const AppProvider = ({ children }: { children: ReactNode }) => {
-    const [isAuthenticated, setIsAuthenticated] = useLocalStorage('health_app_auth', false);
-    const [isLoading, setIsLoading] = useState(true);
-    const [isDataLoading, setIsDataLoading] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const [healthData, setHealthData] = useState<HealthData>(defaultHealthData);
-    const [medications, setMedications] = useState<string[]>(defaultMedications);
-    const [standardPattern, setStandardPattern] = useState<StandardPattern>(defaultStandardPattern);
+    const [isAuthenticated, setIsAuthenticated] = useLocalStorage<boolean>('health_app_auth', false);
+    const [userData, setUserData] = useLocalStorage<UserDataBundle>('health_app_data', defaultUserDataBundle);
     
-    const dataRef = useRef({ healthData, medications, standardPattern, isAuthenticated });
-    useEffect(() => {
-        dataRef.current = { healthData, medications, standardPattern, isAuthenticated };
-    }, [healthData, medications, standardPattern, isAuthenticated]);
+    const [healthData, setHealthData] = useState<HealthData>(userData.healthData);
+    const [medications, setMedications] = useState<string[]>(userData.medications);
+    const [standardPattern, setStandardPattern] = useState<StandardPattern>(userData.standardPattern);
+    
+    const [isLoading, setIsLoading] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
 
     const saveDataTimeout = useRef<number | null>(null);
 
-    const saveDataToJsonbin = useCallback(() => {
+    const saveDataToLocalStorage = useCallback(() => {
         if (saveDataTimeout.current) clearTimeout(saveDataTimeout.current);
-        saveDataTimeout.current = window.setTimeout(async () => {
-            if (!dataRef.current.isAuthenticated) return;
+        saveDataTimeout.current = window.setTimeout(() => {
+            if (!isAuthenticated) return;
             setIsSaving(true);
-            const dataBundle: UserDataBundle = {
-                healthData: dataRef.current.healthData,
-                medications: dataRef.current.medications,
-                standardPattern: dataRef.current.standardPattern,
-            };
-            try {
-                await saveDataToBin(JSONBIN_API_KEY, JSONBIN_BIN_ID, dataBundle);
-            } catch (error) {
-                console.error("Failed to save:", error);
-            } finally {
-                setIsSaving(false);
-            }
-        }, 2000);
-    }, []);
-
-    const loadInitialUserData = useCallback(async () => {
-        setIsDataLoading(true);
-        try {
-            const data = await loadDataFromBin(JSONBIN_API_KEY, JSONBIN_BIN_ID, defaultUserDataBundle);
-            setHealthData(data.healthData || defaultHealthData);
-            setMedications(data.medications || defaultMedications);
-            setStandardPattern(data.standardPattern || defaultStandardPattern);
-        } catch (error) {
-            console.error("Failed to load user data:", error);
-        } finally {
-            setIsDataLoading(false);
-        }
-    }, []);
+            const dataBundle: UserDataBundle = { healthData, medications, standardPattern };
+            setUserData(dataBundle);
+            setIsSaving(false);
+        }, 500);
+    }, [healthData, medications, standardPattern, setUserData, isAuthenticated]);
 
     useEffect(() => {
-        setIsLoading(true);
-        if (isAuthenticated) {
-            loadInitialUserData();
-        }
-        setIsLoading(false);
-    }, [isAuthenticated, loadInitialUserData]);
+        setHealthData(userData.healthData);
+        setMedications(userData.medications);
+        setStandardPattern(userData.standardPattern);
+    }, [userData]);
+    
+    useEffect(() => {
+        saveDataToLocalStorage();
+    }, [healthData, medications, standardPattern, saveDataToLocalStorage]);
 
-    const login = (password: string): boolean => {
+    const login = (password: string) => {
         if (password === APP_PASSWORD) {
             setIsAuthenticated(true);
             return true;
@@ -210,18 +146,13 @@ const AppProvider = ({ children }: { children: ReactNode }) => {
     };
     const logout = () => {
         setIsAuthenticated(false);
-        setHealthData(defaultHealthData);
-        setMedications(defaultMedications);
-        setStandardPattern(defaultStandardPattern);
     };
     const updateHealthData = async (date: string, data: DailyData) => {
         setHealthData(prev => ({ ...prev, [date]: data }));
-        saveDataToJsonbin();
     };
     const addMedication = async (med: string) => {
         if (!medications.includes(med)) {
             setMedications(prev => [...prev, med].sort());
-            saveDataToJsonbin();
         }
     };
     const editMedication = async (oldMed: string, newMed: string) => {
@@ -237,7 +168,6 @@ const AppProvider = ({ children }: { children: ReactNode }) => {
             return acc;
         }, {} as StandardPattern));
         setMedications(prev => prev.map(m => (m === oldMed ? newMed : m)).sort());
-        saveDataToJsonbin();
     };
     const deleteMedication = async (medToDelete: string) => {
         setHealthData(prev => Object.entries(prev).reduce((acc, [date, daily]) => {
@@ -253,23 +183,20 @@ const AppProvider = ({ children }: { children: ReactNode }) => {
             return acc;
         }, {} as StandardPattern));
         setMedications(prev => prev.filter(m => m !== medToDelete));
-        saveDataToJsonbin();
     };
     const updateStandardPattern = async (pattern: StandardPattern) => {
         setStandardPattern(pattern);
-        saveDataToJsonbin();
     };
     const loadUserDataBundle = async (bundle: UserDataBundle) => {
         if (bundle && bundle.healthData && bundle.medications && bundle.standardPattern) {
             setHealthData(bundle.healthData);
             setMedications(bundle.medications);
             setStandardPattern(bundle.standardPattern);
-            saveDataToJsonbin();
         } else {
             throw new Error("Invalid data structure in JSON file.");
         }
     };
-    const value: AppContextType = { isAuthenticated, login, logout, healthData, medications, standardPattern, isLoading, isDataLoading, isSaving, updateHealthData, addMedication, editMedication, deleteMedication, updateStandardPattern, loadUserDataBundle };
+    const value: AppContextType = { isAuthenticated, login, logout, healthData, medications, standardPattern, isLoading, isSaving, updateHealthData, addMedication, editMedication, deleteMedication, updateStandardPattern, loadUserDataBundle };
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
 const useAppContext = () => {
@@ -286,16 +213,9 @@ const LoginScreen = () => {
     const [error, setError] = useState('');
 
     const handleLogin = () => {
-        if (!password.trim()) {
-            setError('La contraseña es obligatoria.');
-            return;
-        }
         const success = login(password);
         if (!success) {
             setError('Contraseña incorrecta.');
-            setPassword('');
-        } else {
-            setError('');
         }
     };
 
@@ -304,7 +224,7 @@ const LoginScreen = () => {
             <div className="w-full max-w-sm p-8 space-y-6 bg-white rounded-xl shadow-lg">
                 <div className="text-center">
                     <h1 className="text-3xl font-bold text-slate-800">Monitor de Salud</h1>
-                    <p className="mt-2 text-slate-500">Ingrese la contraseña para acceder.</p>
+                    <p className="mt-2 text-slate-500">Ingrese su contraseña para continuar</p>
                 </div>
                 <form onSubmit={(e) => { e.preventDefault(); handleLogin(); }} className="space-y-4">
                     <div>
@@ -314,7 +234,7 @@ const LoginScreen = () => {
                     {error && <p className="text-sm text-red-500">{error}</p>}
                     <div className="pt-2">
                         <button type="submit" className="w-full inline-flex justify-center items-center px-4 py-3 font-semibold text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300">
-                            Iniciar sesión
+                            Acceder
                         </button>
                     </div>
                 </form>
@@ -516,7 +436,7 @@ const StandardPatternManager = () => {
 type View = 'tracker' | 'medications' | 'pattern';
 type TrackerTab = 'input' | 'chart';
 const App = () => {
-    const { isAuthenticated, logout, isLoading, isDataLoading, isSaving, healthData, medications, standardPattern, loadUserDataBundle } = useAppContext();
+    const { isAuthenticated, logout, isLoading, isSaving, healthData, medications, standardPattern, loadUserDataBundle } = useAppContext();
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
     const [view, setView] = useState<View>('tracker');
@@ -546,7 +466,7 @@ const App = () => {
             try {
                 const importedData = JSON.parse(e.target?.result as string);
                 await loadUserDataBundle(importedData);
-                alert('Datos importados y sincronizados con éxito.');
+                alert('Datos importados con éxito.');
             } catch (error: any) { alert(`Error al importar: ${error.message}`); }
         };
         reader.readAsText(file);
@@ -555,7 +475,6 @@ const App = () => {
 
     if (isLoading) return <div className="flex items-center justify-center min-h-screen"><Loader className="animate-spin"/></div>;
     if (!isAuthenticated) return <LoginScreen />;
-    if (isDataLoading) return <div className="flex items-center justify-center min-h-screen">Cargando datos...</div>;
 
     const selectedDateString = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null;
 
