@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -17,14 +18,16 @@
 <script type="importmap">
 {
   "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react": "https://esm.sh/react@18.2.0",
+    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "recharts": "https://esm.sh/recharts@2.12.7",
+    "date-fns": "https://esm.sh/date-fns@3.6.0",
+    "date-fns/locale": "https://esm.sh/date-fns@3.6.0/locale",
+    "lucide-react": "https://esm.sh/lucide-react@0.378.0",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "recharts": "https://aistudiocdn.com/recharts@^3.3.0",
     "date-fns/": "https://aistudiocdn.com/date-fns@^4.1.0/",
-    "date-fns": "https://aistudiocdn.com/date-fns@^4.1.0",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.548.0",
-    "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.78.0"
+    "react/": "https://aistudiocdn.com/react@^19.2.0/"
   }
 }
 </script>
@@ -34,6 +37,6 @@
 <body class="bg-slate-50 text-slate-800">
 <div id="root"></div>
 <!-- Change script type to text/babel and add presets to enable transpilation -->
-<script type="text/babel" data-presets="react,typescript" data-type="module" src="./index.tsx"></script>
+<script type="text/babel" data-presets="react,typescript" src="./index.tsx"></script>
 </body>
 </html>

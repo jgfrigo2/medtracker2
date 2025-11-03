@@ -10,11 +10,10 @@
   },
   "dependencies": {
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "recharts": "^3.3.0",
+    "recharts": "2.12.7",
     "date-fns": "^4.1.0",
-    "lucide-react": "^0.548.0",
-    "@supabase/supabase-js": "^2.78.0"
+    "lucide-react": "0.378.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
